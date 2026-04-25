@@ -1,8 +1,0 @@
-[package]
-name = "ws-reader"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-tungstenite = { version = "0.21", features = ["native-tls"] }
-url = "2"

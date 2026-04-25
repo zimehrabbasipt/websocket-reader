@@ -1,0 +1,25 @@
+{
+  "productName": "WS Reader",
+  "version": "0.1.0",
+  "identifier": "com.wsreader.dev",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "WS Reader",
+        "width": 1200,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src https: http:; connect-src ipc: http://ipc.localhost"
+    }
+  }
+}
