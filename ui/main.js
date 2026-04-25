@@ -4,6 +4,7 @@ const { listen } = window.__TAURI__.event;
 // DOM elements
 const browserUrl = document.getElementById('browser-url');
 const btnGo      = document.getElementById('btn-go');
+const btnScout   = document.getElementById('btn-scout');
 const btnClear   = document.getElementById('btn-clear');
 const messageLog = document.getElementById('message-log');
 
@@ -41,8 +42,37 @@ btnClear.addEventListener('click', () => {
     messageLog.innerHTML = '';
 });
 
+// ---- Scout toggle ----
+
+let scouting = false;
+
+btnScout.addEventListener('click', async () => {
+    scouting = !scouting;
+    try {
+        await invoke('toggle_scout', { active: scouting });
+        btnScout.textContent = scouting ? 'Stop Scout' : 'Scout';
+        btnScout.classList.toggle('active', scouting);
+        addMessage(scouting ? 'Scouting started — auto-walking, looking for Lv.40+...' : 'Scouting stopped', 'msg-scout');
+    } catch (err) {
+        addMessage('Scout error: ' + err, 'msg-error');
+    }
+});
+
+// When a high-level Pokemon is found, stop scouting and alert
+listen('scout-found', (event) => {
+    scouting = false;
+    btnScout.textContent = 'Scout';
+    btnScout.classList.remove('active');
+    addMessage(event.payload, 'msg-found');
+});
+
 // ---- Intercepted WebSocket frames from browser windows ----
 
 listen('ws-intercepted', (event) => {
-    addMessage(event.payload, 'msg-intercepted');
+    // Color scout reports differently
+    if (event.payload.startsWith('[SCOUT]')) {
+        addMessage(event.payload, 'msg-scout');
+    } else {
+        addMessage(event.payload, 'msg-intercepted');
+    }
 });

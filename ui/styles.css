@@ -63,6 +63,11 @@ body {
     margin-bottom: 0;
 }
 
+.header-buttons {
+    display: flex;
+    gap: 6px;
+}
+
 .btn-small {
     padding: 4px 12px;
     font-size: 11px;
@@ -71,6 +76,27 @@ body {
 }
 
 .btn-small:hover { background: #585b70; }
+
+.btn-scout {
+    padding: 4px 14px;
+    font-size: 11px;
+    background: #a6e3a1;
+    color: #1e1e2e;
+}
+
+.btn-scout:hover { background: #94e2d5; }
+
+.btn-scout.active {
+    background: #f38ba8;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.btn-scout.active:hover { background: #eba0ac; }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
 
 input[type="text"] {
     flex: 1;
@@ -115,3 +141,7 @@ button:disabled { background: #45475a; color: #6c7086; cursor: not-allowed; }
 .msg-error { color: #f38ba8; }
 .msg-intercepted { color: #cba6f7; }
 .msg-intercepted::before { content: "[BROWSER WS] "; font-weight: bold; }
+.msg-scout { color: #f9e2af; }
+.msg-scout::before { content: "[SCOUT] "; font-weight: bold; }
+.msg-found { color: #a6e3a1; font-weight: bold; font-size: 14px; }
+.msg-found::before { content: "[FOUND] "; }
