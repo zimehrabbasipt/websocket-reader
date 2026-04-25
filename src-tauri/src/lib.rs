@@ -9,30 +9,146 @@ const WS_INTERCEPTOR: &str = r#"
 (function() {
     const OrigWS = window.WebSocket;
 
-    // Convert an ArrayBuffer to a decoded string.
-    // Tries UTF-8 first. If > 20% of chars are control chars, falls back to hex.
+    // --- Raw Protobuf Decoder ---
+    // Decodes protobuf wire format without a schema.
+    // Shows field numbers, types, and values.
+
+    function readVarint(bytes, offset) {
+        let result = 0, shift = 0;
+        while (offset < bytes.length) {
+            const b = bytes[offset++];
+            result |= (b & 0x7f) << shift;
+            if ((b & 0x80) === 0) return { value: result >>> 0, offset: offset };
+            shift += 7;
+            if (shift > 35) return null; // too large for safe int
+        }
+        return null;
+    }
+
+    function readFixed32(bytes, offset) {
+        if (offset + 4 > bytes.length) return null;
+        const buf = new ArrayBuffer(4);
+        const view = new DataView(buf);
+        for (let i = 0; i < 4; i++) view.setUint8(i, bytes[offset + i]);
+        return { value: view.getFloat32(0, true), offset: offset + 4 };
+    }
+
+    function readFixed64(bytes, offset) {
+        if (offset + 8 > bytes.length) return null;
+        const buf = new ArrayBuffer(8);
+        const view = new DataView(buf);
+        for (let i = 0; i < 8; i++) view.setUint8(i, bytes[offset + i]);
+        return { value: view.getFloat64(0, true), offset: offset + 8 };
+    }
+
+    function decodeProtobuf(bytes, offset, end) {
+        const fields = [];
+        while (offset < end) {
+            const tag = readVarint(bytes, offset);
+            if (!tag) break;
+            offset = tag.offset;
+            const fieldNum = tag.value >>> 3;
+            const wireType = tag.value & 0x7;
+            if (fieldNum === 0 || fieldNum > 536870911) return null; // invalid
+
+            if (wireType === 0) { // varint
+                const v = readVarint(bytes, offset);
+                if (!v) return null;
+                offset = v.offset;
+                fields.push(fieldNum + ':' + v.value);
+            } else if (wireType === 1) { // 64-bit
+                const v = readFixed64(bytes, offset);
+                if (!v) return null;
+                offset = v.offset;
+                const f = v.value;
+                if (Number.isFinite(f) && Math.abs(f) > 0.0001 && Math.abs(f) < 1e15) {
+                    fields.push(fieldNum + ':' + parseFloat(f.toFixed(4)) + 'd');
+                } else {
+                    fields.push(fieldNum + ':0x' + Array.from(bytes.slice(offset-8, offset)).map(b => b.toString(16).padStart(2,'0')).join(''));
+                }
+            } else if (wireType === 2) { // length-delimited (string, bytes, or nested msg)
+                const lenV = readVarint(bytes, offset);
+                if (!lenV || lenV.offset + lenV.value > end) return null;
+                offset = lenV.offset;
+                const chunk = bytes.slice(offset, offset + lenV.value);
+                offset += lenV.value;
+
+                // Try as UTF-8 string FIRST — short printable text is almost
+                // certainly a string, not a nested message. Without this,
+                // names like "Ekans" get misread as protobuf because 0x45 ('E')
+                // happens to be a valid tag (field 8, wire type 5).
+                let isString = false;
+                try {
+                    const text = new TextDecoder('utf-8', { fatal: true }).decode(chunk);
+                    let printable = true;
+                    for (let i = 0; i < text.length; i++) {
+                        const c = text.charCodeAt(i);
+                        if (c < 32 && c !== 9 && c !== 10 && c !== 13) { printable = false; break; }
+                    }
+                    if (printable && text.length > 0) {
+                        fields.push(fieldNum + ':"' + text + '"');
+                        isString = true;
+                    }
+                } catch(e) {}
+                if (isString) continue;
+
+                // Then try nested protobuf
+                const nested = decodeProtobuf(chunk, 0, chunk.length);
+                if (nested && nested.length > 0) {
+                    fields.push(fieldNum + ':{' + nested.join(', ') + '}');
+                    continue;
+                }
+
+                // Raw bytes
+                const hex = Array.from(chunk.slice(0, 32)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+                fields.push(fieldNum + ':[' + chunk.length + 'B ' + hex + (chunk.length > 32 ? '...' : '') + ']');
+            } else if (wireType === 5) { // 32-bit (float)
+                const v = readFixed32(bytes, offset);
+                if (!v) return null;
+                offset = v.offset;
+                const f = v.value;
+                if (Number.isFinite(f) && Math.abs(f) > 0.0001 && Math.abs(f) < 1e10) {
+                    fields.push(fieldNum + ':' + parseFloat(f.toFixed(4)) + 'f');
+                } else {
+                    fields.push(fieldNum + ':0x' + Array.from(bytes.slice(offset-4, offset)).map(b => b.toString(16).padStart(2,'0')).join(''));
+                }
+            } else {
+                return null; // unknown wire type, not protobuf
+            }
+        }
+        return fields;
+    }
+
     function decodeBuffer(buf) {
         const bytes = new Uint8Array(buf);
         const len = bytes.length;
         if (len === 0) return '[empty binary]';
 
-        // Try UTF-8 decode
+        // Try UTF-8 text first
         try {
             const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-            // Check if it looks like readable text (not garbled binary)
             let controlCount = 0;
             for (let i = 0; i < Math.min(text.length, 200); i++) {
                 const c = text.charCodeAt(i);
                 if (c < 32 && c !== 9 && c !== 10 && c !== 13) controlCount++;
             }
             if (controlCount < text.length * 0.2) {
-                // Looks like text
                 if (text.length > 500) return '(text ' + len + 'B) ' + text.substring(0, 500) + '...';
                 return '(text ' + len + 'B) ' + text;
             }
         } catch(e) {}
 
-        // Fall back to hex dump (show first 128 bytes)
+        // Try protobuf decode
+        try {
+            const fields = decodeProtobuf(bytes, 0, bytes.length);
+            if (fields && fields.length > 0) {
+                const decoded = '{' + fields.join(', ') + '}';
+                if (decoded.length > 800) return '(proto ' + len + 'B) ' + decoded.substring(0, 800) + '...';
+                return '(proto ' + len + 'B) ' + decoded;
+            }
+        } catch(e) {}
+
+        // Fall back to hex dump
         const limit = Math.min(len, 128);
         let hex = '';
         for (let i = 0; i < limit; i++) {
