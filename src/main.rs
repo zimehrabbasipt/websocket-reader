@@ -3,7 +3,7 @@ use tungstenite::Message;
 use url::Url;
 
 fn main() {
-    let url = "wss://echo.websocket.org";
+    let url = "ws://127.0.0.1:9001";
 
     println!("Connecting to {}...", url);
 
@@ -12,32 +12,37 @@ fn main() {
 
     println!("Connected! HTTP status: {}", response.status());
 
-    // Send a test message
-    socket
-        .send(Message::Text("Hello from Rust!".into()))
-        .expect("Failed to send");
+    // Send a few test messages
+    let messages = vec![
+        "Hello from Rust!",
+        "WebSockets are cool",
+        "This is message 3",
+    ];
 
-    println!("Sent: Hello from Rust!");
-    println!("Waiting for messages...\n");
+    for msg in &messages {
+        socket
+            .send(Message::Text((*msg).into()))
+            .expect("Failed to send");
+        println!("[SENT] {}", msg);
 
-    // Read loop — blocks until a message arrives
-    loop {
+        // Read the echo back
         match socket.read() {
-            Ok(msg) => match msg {
-                Message::Text(text) => println!("[TEXT] {}", text),
-                Message::Binary(bin) => println!("[BIN]  {} bytes", bin.len()),
-                Message::Ping(_) => println!("[PING]"),
-                Message::Pong(_) => println!("[PONG]"),
-                Message::Close(frame) => {
-                    println!("[CLOSE] {:?}", frame);
-                    break;
-                }
-                _ => {}
-            },
+            Ok(Message::Text(text)) => println!("[RECV] {}\n", text),
+            Ok(other) => println!("[RECV] {:?}\n", other),
             Err(e) => {
                 println!("Error: {}", e);
                 break;
             }
+        }
+    }
+
+    // Close the connection
+    socket.close(None).ok();
+    // Drain remaining messages until close confirmation
+    loop {
+        match socket.read() {
+            Ok(Message::Close(_)) | Err(_) => break,
+            _ => {}
         }
     }
 
