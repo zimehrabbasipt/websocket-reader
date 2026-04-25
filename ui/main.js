@@ -2,33 +2,32 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 // DOM elements
-const browserUrl    = document.getElementById('browser-url');
-const btnGo         = document.getElementById('btn-go');
-const browserFrame  = document.getElementById('browser-frame');
-const wsUrl         = document.getElementById('ws-url');
-const btnConnect    = document.getElementById('btn-connect');
-const btnDisconnect = document.getElementById('btn-disconnect');
-const wsMessage     = document.getElementById('ws-message');
-const btnSend       = document.getElementById('btn-send');
-const wsStatus      = document.getElementById('ws-status');
-const messageLog    = document.getElementById('message-log');
+const browserUrl = document.getElementById('browser-url');
+const btnGo      = document.getElementById('btn-go');
+const btnClear   = document.getElementById('btn-clear');
+const messageLog = document.getElementById('message-log');
 
-// ---- Browser Panel ----
+// ---- Browser ----
 
-btnGo.addEventListener('click', () => {
+btnGo.addEventListener('click', async () => {
     let url = browserUrl.value.trim();
-    if (url && !url.startsWith('http')) {
+    if (!url) return;
+    if (!url.startsWith('http')) {
         url = 'https://' + url;
         browserUrl.value = url;
     }
-    browserFrame.src = url;
+    try {
+        await invoke('open_browser', { url });
+    } catch (err) {
+        addMessage('Browser error: ' + err, 'msg-error');
+    }
 });
 
 browserUrl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') btnGo.click();
 });
 
-// ---- WebSocket Panel ----
+// ---- Message Log ----
 
 function addMessage(text, className) {
     const div = document.createElement('div');
@@ -38,66 +37,12 @@ function addMessage(text, className) {
     messageLog.scrollTop = messageLog.scrollHeight;
 }
 
-function setConnected(connected) {
-    btnConnect.disabled = connected;
-    btnDisconnect.disabled = !connected;
-    wsMessage.disabled = !connected;
-    btnSend.disabled = !connected;
-    wsStatus.textContent = connected ? 'Connected' : 'Disconnected';
-    wsStatus.className = 'ws-status ' + (connected ? 'connected' : 'disconnected');
-}
-
-btnConnect.addEventListener('click', async () => {
-    const url = wsUrl.value.trim();
-    if (!url) return;
-    try {
-        addMessage('Connecting to ' + url + '...', 'msg-system');
-        await invoke('ws_connect', { url });
-        setConnected(true);
-        addMessage('Connected to ' + url, 'msg-system');
-    } catch (err) {
-        addMessage('Connection failed: ' + err, 'msg-error');
-    }
+btnClear.addEventListener('click', () => {
+    messageLog.innerHTML = '';
 });
 
-btnDisconnect.addEventListener('click', async () => {
-    try {
-        await invoke('ws_disconnect');
-        setConnected(false);
-        addMessage('Disconnected', 'msg-system');
-    } catch (err) {
-        addMessage('Disconnect error: ' + err, 'msg-error');
-    }
-});
+// ---- Intercepted WebSocket frames from browser windows ----
 
-btnSend.addEventListener('click', async () => {
-    const msg = wsMessage.value.trim();
-    if (!msg) return;
-    try {
-        await invoke('ws_send', { message: msg });
-        addMessage(msg, 'msg-sent');
-        wsMessage.value = '';
-    } catch (err) {
-        addMessage('Send error: ' + err, 'msg-error');
-    }
-});
-
-wsMessage.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') btnSend.click();
-});
-
-// ---- Listen for WS messages from Rust backend ----
-
-listen('ws-message', (event) => {
-    addMessage(event.payload, 'msg-recv');
-});
-
-listen('ws-closed', (event) => {
-    setConnected(false);
-    addMessage('Connection closed: ' + event.payload, 'msg-system');
-});
-
-listen('ws-error', (event) => {
-    setConnected(false);
-    addMessage('Error: ' + event.payload, 'msg-error');
+listen('ws-intercepted', (event) => {
+    addMessage(event.payload, 'msg-intercepted');
 });

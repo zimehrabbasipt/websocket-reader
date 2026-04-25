@@ -8,43 +8,23 @@
 </head>
 <body>
     <div class="container">
-        <!-- Left Panel: Browser -->
-        <div class="panel browser-panel">
-            <div class="panel-header">
-                <h2>Browser</h2>
-            </div>
+        <!-- Top: Browser Bar -->
+        <div class="browser-bar">
+            <h2>Browser</h2>
             <div class="url-bar">
                 <input type="text" id="browser-url"
                        placeholder="https://example.com"
                        value="https://example.com">
-                <button id="btn-go">Go</button>
-            </div>
-            <div class="iframe-container">
-                <iframe id="browser-frame"
-                        src="https://example.com"
-                        sandbox="allow-scripts allow-same-origin allow-forms">
-                </iframe>
+                <button id="btn-go">Open</button>
             </div>
         </div>
 
-        <!-- Right Panel: WebSocket -->
-        <div class="panel ws-panel">
+        <!-- WebSocket Inspector -->
+        <div class="ws-panel">
             <div class="panel-header">
-                <h2>WebSocket</h2>
+                <h2>WebSocket Inspector</h2>
+                <button id="btn-clear" class="btn-small">Clear</button>
             </div>
-            <div class="ws-controls">
-                <input type="text" id="ws-url"
-                       placeholder="ws://127.0.0.1:9001"
-                       value="ws://127.0.0.1:9001">
-                <button id="btn-connect">Connect</button>
-                <button id="btn-disconnect" disabled>Disconnect</button>
-            </div>
-            <div class="ws-send">
-                <input type="text" id="ws-message"
-                       placeholder="Type a message..." disabled>
-                <button id="btn-send" disabled>Send</button>
-            </div>
-            <div class="ws-status disconnected" id="ws-status">Disconnected</div>
             <div class="message-log" id="message-log"></div>
         </div>
     </div>

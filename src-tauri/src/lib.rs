@@ -1,103 +1,97 @@
-use futures_util::{SinkExt, StreamExt};
-use tauri::{AppHandle, Emitter};
-use tokio::sync::Mutex;
-use tokio_tungstenite::tungstenite::Message;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tauri::{AppHandle, Emitter, WebviewUrl, WebviewWindowBuilder};
 
-type WsSink = futures_util::stream::SplitSink<
-    tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    Message,
->;
+static BROWSER_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-struct WsState {
-    sink: Mutex<Option<WsSink>>,
-}
+// This script gets injected into every browser window BEFORE the page loads.
+// It monkey-patches the WebSocket constructor so we can intercept all frames.
+const WS_INTERCEPTOR: &str = r#"
+(function() {
+    const OrigWS = window.WebSocket;
 
-#[tauri::command]
-async fn ws_connect(
-    url: String,
-    app: AppHandle,
-    state: tauri::State<'_, WsState>,
-) -> Result<(), String> {
-    let (ws_stream, _response) = tokio_tungstenite::connect_async(&url)
-        .await
-        .map_err(|e| format!("Connection failed: {e}"))?;
+    function InterceptedWebSocket(url, protocols) {
+        const ws = (protocols !== undefined)
+            ? new OrigWS(url, protocols)
+            : new OrigWS(url);
 
-    let (write, read) = ws_stream.split();
+        const report = (frameType, data) => {
+            try {
+                if (window.__TAURI_INTERNALS__) {
+                    window.__TAURI_INTERNALS__.invoke('report_ws_frame', {
+                        frameType: frameType,
+                        wsUrl: url,
+                        data: data
+                    });
+                }
+            } catch(e) {}
+        };
 
-    {
-        let mut sink = state.sink.lock().await;
-        *sink = Some(write);
+        ws.addEventListener('open', () => report('OPEN', 'connected'));
+
+        ws.addEventListener('message', (e) => {
+            let d = typeof e.data === 'string' ? e.data : '[binary]';
+            if (d.length > 500) d = d.substring(0, 500) + '...';
+            report('RECV', d);
+        });
+
+        ws.addEventListener('close', (e) => report('CLOSE', e.reason || 'closed'));
+
+        ws.addEventListener('error', () => report('ERROR', 'connection error'));
+
+        const origSend = ws.send.bind(ws);
+        ws.send = function(data) {
+            let d = typeof data === 'string' ? data : '[binary]';
+            if (d.length > 500) d = d.substring(0, 500) + '...';
+            report('SEND', d);
+            return origSend(data);
+        };
+
+        return ws;
     }
 
-    // Spawn a read loop that pushes incoming messages to the frontend
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let mut read = read;
-        while let Some(result) = read.next().await {
-            match result {
-                Ok(Message::Text(text)) => {
-                    let _ = app_handle.emit("ws-message", text.to_string());
-                }
-                Ok(Message::Binary(bin)) => {
-                    let _ = app_handle.emit(
-                        "ws-message",
-                        format!("[binary: {} bytes]", bin.len()),
-                    );
-                }
-                Ok(Message::Close(frame)) => {
-                    let reason = frame
-                        .map(|f| f.reason.to_string())
-                        .unwrap_or_else(|| "remote closed".into());
-                    let _ = app_handle.emit("ws-closed", reason);
-                    break;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    let _ = app_handle.emit("ws-error", e.to_string());
-                    break;
-                }
-            }
-        }
-    });
+    InterceptedWebSocket.prototype = OrigWS.prototype;
+    InterceptedWebSocket.CONNECTING = 0;
+    InterceptedWebSocket.OPEN = 1;
+    InterceptedWebSocket.CLOSING = 2;
+    InterceptedWebSocket.CLOSED = 3;
+
+    window.WebSocket = InterceptedWebSocket;
+})();
+"#;
+
+#[tauri::command]
+async fn open_browser(url: String, app: AppHandle) -> Result<(), String> {
+    let id = BROWSER_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("browser-{id}");
+
+    let external_url = url.parse::<tauri::Url>().map_err(|e| format!("Invalid URL: {e}"))?;
+
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(external_url))
+        .title(url)
+        .inner_size(1024.0, 768.0)
+        .initialization_script(WS_INTERCEPTOR)
+        .build()
+        .map_err(|e| format!("Failed to open browser: {e}"))?;
 
     Ok(())
 }
 
 #[tauri::command]
-async fn ws_send(
-    message: String,
-    state: tauri::State<'_, WsState>,
+async fn report_ws_frame(
+    frame_type: String,
+    ws_url: String,
+    data: String,
+    app: AppHandle,
 ) -> Result<(), String> {
-    let mut sink = state.sink.lock().await;
-    match sink.as_mut() {
-        Some(writer) => writer
-            .send(Message::Text(message.into()))
-            .await
-            .map_err(|e| format!("Send failed: {e}")),
-        None => Err("Not connected".into()),
-    }
-}
-
-#[tauri::command]
-async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), String> {
-    let mut sink = state.sink.lock().await;
-    if let Some(mut writer) = sink.take() {
-        writer
-            .close()
-            .await
-            .map_err(|e| format!("Close failed: {e}"))?;
-    }
+    let payload = format!("[{}] {} | {}", frame_type, ws_url, data);
+    app.emit("ws-intercepted", payload)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(WsState {
-            sink: Mutex::new(None),
-        })
-        .invoke_handler(tauri::generate_handler![ws_connect, ws_send, ws_disconnect])
+        .invoke_handler(tauri::generate_handler![open_browser, report_ws_frame])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
