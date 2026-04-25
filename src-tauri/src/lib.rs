@@ -296,7 +296,7 @@ const WS_INTERCEPTOR: &str = r#"
             }
         } catch(e) {}
 
-        if (pokemon.level >= 16) {
+        if (pokemon.level >= 40) {
             window.__stopScout();
             try {
                 if (window.__TAURI_INTERNALS__) {
