@@ -5,6 +5,7 @@ const { listen } = window.__TAURI__.event;
 const browserUrl = document.getElementById('browser-url');
 const btnGo      = document.getElementById('btn-go');
 const btnScout   = document.getElementById('btn-scout');
+const scoutSteps = document.getElementById('scout-steps');
 const btnClear   = document.getElementById('btn-clear');
 const messageLog = document.getElementById('message-log');
 
@@ -48,11 +49,12 @@ let scouting = false;
 
 btnScout.addEventListener('click', async () => {
     scouting = !scouting;
+    const steps = parseInt(scoutSteps.value) || 3;
     try {
-        await invoke('toggle_scout', { active: scouting });
+        await invoke('toggle_scout', { active: scouting, steps });
         btnScout.textContent = scouting ? 'Stop Scout' : 'Scout';
         btnScout.classList.toggle('active', scouting);
-        addMessage(scouting ? 'Scouting started — auto-walking, looking for Lv.40+...' : 'Scouting stopped', 'msg-scout');
+        addMessage(scouting ? 'Scouting started — ' + steps + ' steps per direction, looking for Lv.40+...' : 'Scouting stopped', 'msg-scout');
     } catch (err) {
         addMessage('Scout error: ' + err, 'msg-error');
     }

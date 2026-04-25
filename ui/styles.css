@@ -65,7 +65,32 @@ body {
 
 .header-buttons {
     display: flex;
+    align-items: center;
     gap: 6px;
+}
+
+.steps-label {
+    font-size: 11px;
+    color: #a6adc8;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.steps-label input {
+    width: 48px;
+    padding: 4px 6px;
+    font-size: 11px;
+    background: #313244;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    color: #cdd6f4;
+    text-align: center;
+}
+
+.steps-label input:focus {
+    outline: none;
+    border-color: #89b4fa;
 }
 
 .btn-small {

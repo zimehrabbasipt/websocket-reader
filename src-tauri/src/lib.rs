@@ -234,6 +234,8 @@ const WS_INTERCEPTOR: &str = r#"
     window.__scoutActive = false;
     let walkInterval = null;
     let walkLeft = true;
+    let stepCount = 0;
+    let stepsPerDirection = 3;
 
     function pressKey(key, code, keyCode) {
         const down = new KeyboardEvent('keydown', {
@@ -246,9 +248,12 @@ const WS_INTERCEPTOR: &str = r#"
         setTimeout(() => document.dispatchEvent(up), 80);
     }
 
-    window.__startScout = function() {
+    window.__startScout = function(steps) {
         if (window.__scoutActive) return;
         window.__scoutActive = true;
+        stepsPerDirection = steps || 3;
+        stepCount = 0;
+        walkLeft = true;
         walkInterval = setInterval(() => {
             if (!window.__scoutActive) return;
             if (walkLeft) {
@@ -256,7 +261,11 @@ const WS_INTERCEPTOR: &str = r#"
             } else {
                 pressKey('ArrowRight', 'ArrowRight', 39);
             }
-            walkLeft = !walkLeft;
+            stepCount++;
+            if (stepCount >= stepsPerDirection) {
+                stepCount = 0;
+                walkLeft = !walkLeft;
+            }
         }, 250);
     };
 
@@ -400,17 +409,17 @@ async fn scout_found(name: String, level: u32, app: AppHandle) -> Result<(), Str
 }
 
 #[tauri::command]
-async fn toggle_scout(active: bool, app: AppHandle) -> Result<(), String> {
-    // Run __startScout() or __stopScout() in ALL browser windows
+async fn toggle_scout(active: bool, steps: u32, app: AppHandle) -> Result<(), String> {
+    // Run __startScout(steps) or __stopScout() in ALL browser windows
     let js = if active {
-        "if(window.__startScout) window.__startScout();"
+        format!("if(window.__startScout) window.__startScout({});", steps)
     } else {
-        "if(window.__stopScout) window.__stopScout();"
+        "if(window.__stopScout) window.__stopScout();".to_string()
     };
 
     for (label, window) in app.webview_windows() {
         if label.starts_with("browser-") {
-            let _ = window.eval(js);
+            let _ = window.eval(&js);
         }
     }
 
