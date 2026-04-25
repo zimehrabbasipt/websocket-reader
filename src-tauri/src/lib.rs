@@ -9,6 +9,59 @@ const WS_INTERCEPTOR: &str = r#"
 (function() {
     const OrigWS = window.WebSocket;
 
+    // Convert an ArrayBuffer to a decoded string.
+    // Tries UTF-8 first. If > 20% of chars are control chars, falls back to hex.
+    function decodeBuffer(buf) {
+        const bytes = new Uint8Array(buf);
+        const len = bytes.length;
+        if (len === 0) return '[empty binary]';
+
+        // Try UTF-8 decode
+        try {
+            const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            // Check if it looks like readable text (not garbled binary)
+            let controlCount = 0;
+            for (let i = 0; i < Math.min(text.length, 200); i++) {
+                const c = text.charCodeAt(i);
+                if (c < 32 && c !== 9 && c !== 10 && c !== 13) controlCount++;
+            }
+            if (controlCount < text.length * 0.2) {
+                // Looks like text
+                if (text.length > 500) return '(text ' + len + 'B) ' + text.substring(0, 500) + '...';
+                return '(text ' + len + 'B) ' + text;
+            }
+        } catch(e) {}
+
+        // Fall back to hex dump (show first 128 bytes)
+        const limit = Math.min(len, 128);
+        let hex = '';
+        for (let i = 0; i < limit; i++) {
+            hex += bytes[i].toString(16).padStart(2, '0') + ' ';
+        }
+        if (len > limit) hex += '...';
+        return '(bin ' + len + 'B) ' + hex.trim();
+    }
+
+    // Decode any data type (string, ArrayBuffer, Blob, TypedArray)
+    // Returns a promise that resolves to a display string.
+    async function decodeData(data) {
+        if (typeof data === 'string') {
+            if (data.length > 500) return data.substring(0, 500) + '...';
+            return data;
+        }
+        if (data instanceof ArrayBuffer) {
+            return decodeBuffer(data);
+        }
+        if (data instanceof Blob) {
+            const buf = await data.arrayBuffer();
+            return decodeBuffer(buf);
+        }
+        if (ArrayBuffer.isView(data)) {
+            return decodeBuffer(data.buffer);
+        }
+        return '[unknown type]';
+    }
+
     function InterceptedWebSocket(url, protocols) {
         const ws = (protocols !== undefined)
             ? new OrigWS(url, protocols)
@@ -29,9 +82,7 @@ const WS_INTERCEPTOR: &str = r#"
         ws.addEventListener('open', () => report('OPEN', 'connected'));
 
         ws.addEventListener('message', (e) => {
-            let d = typeof e.data === 'string' ? e.data : '[binary]';
-            if (d.length > 500) d = d.substring(0, 500) + '...';
-            report('RECV', d);
+            decodeData(e.data).then(d => report('RECV', d));
         });
 
         ws.addEventListener('close', (e) => report('CLOSE', e.reason || 'closed'));
@@ -40,9 +91,7 @@ const WS_INTERCEPTOR: &str = r#"
 
         const origSend = ws.send.bind(ws);
         ws.send = function(data) {
-            let d = typeof data === 'string' ? data : '[binary]';
-            if (d.length > 500) d = d.substring(0, 500) + '...';
-            report('SEND', d);
+            decodeData(data).then(d => report('SEND', d));
             return origSend(data);
         };
 
